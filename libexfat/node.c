@@ -251,7 +251,7 @@ static void decompress_upcase(uint16_t* output, const le16_t* source,
  * Reads one entry in directory at position pointed by iterator and fills
  * node structure.
  */
-static int readdir(struct exfat* ef, const struct exfat_node* parent,
+static int readdir(struct exfat* ef, struct exfat_node* parent,
 		struct exfat_node** node, struct iterator* it)
 {
 	int rc = -EIO;
@@ -275,14 +275,7 @@ static int readdir(struct exfat* ef, const struct exfat_node* parent,
 	for (;;)
 	{
 		if (it->offset >= parent->size)
-		{
-			if (continuations != 0)
-			{
-				exfat_error("expected %hhu continuations", continuations);
-				goto error;
-			}
-			return -ENOENT; /* that's OK, means end of directory */
-		}
+			goto success;
 
 		entry = get_entry_ptr(ef, it);
 		switch (entry->type)
@@ -490,6 +483,20 @@ static int readdir(struct exfat* ef, const struct exfat_node* parent,
 				goto error;
 			break;
 
+		case 0:
+			/* exFAT does not have end-of-directory entries. However, we can
+			   safely assume that there are no valid entries in a directory
+			   after a zero entry. The problem here is that some buggy cameras
+			   have garbage after it in the root directory. As a workaround,
+			   we zero out root directory space after the first zero entry. */
+			if (!ef->ro && parent == ef->root)
+			{
+				rc = exfat_erase_range(ef, parent, it->offset, parent->size);
+				if (rc != 0)
+					goto error;
+			}
+			goto success;
+
 		default:
 			if (!(entry->type & EXFAT_ENTRY_VALID))
 				break; /* deleted entry, ignore it */
@@ -518,6 +525,14 @@ error:
 	free(*node);
 	*node = NULL;
 	return rc;
+
+success:
+	if (continuations != 0)
+	{
+		exfat_error("expected %hhu continuations", continuations);
+		goto error;
+	}
+	return -ENOENT; /* that's OK, means end of directory */
 }
 
 int exfat_cache_directory(struct exfat* ef, struct exfat_node* dir)
