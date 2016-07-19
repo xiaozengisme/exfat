@@ -225,6 +225,20 @@ static bool check_node(const struct exfat_node* node, uint16_t actual_checksum,
 		ret = false;
 	}
 
+	/*
+	   Non-empty file must start from a valid cluster. Directory always
+	   has at least one cluster and it must be valid too.
+	*/
+	if ((node->size > 0 || node->flags & EXFAT_ATTRIB_DIR) &&
+			CLUSTER_INVALID(node->start_cluster))
+	{
+		exfat_get_name(node, buffer, sizeof(buffer) - 1);
+		exfat_error("'%s' %s points to invalid cluster %#x", buffer,
+				node->flags & EXFAT_ATTRIB_DIR ? "directory" : "file",
+				node->start_cluster);
+		ret = false;
+	}
+
 	return ret;
 }
 
